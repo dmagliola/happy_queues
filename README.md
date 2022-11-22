@@ -1,2 +1,3 @@
-# happy_queues
-Extra information for my Rubyconf 2022 talk: "The secret to happy queues"
+# The secret to happy queues
+
+Companion for my Rubyconf 2022 talk: "The secret to happy queues"
