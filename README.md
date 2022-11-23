@@ -59,7 +59,7 @@ actual data from real jobs.
 I touch on this at the end of the talk, but I think it bears bullet-pointing.
 
 It's possible you are lucky and have a greenfield project, I'm very jealous.
-But if like most of us you have a running system... You'll need to migrate to it.
+But if like most of us you have a running system... You'll need to migrate to this new structure.
 And it can be quite painful, going through hundreds or thousands of job classes and figuring 
 out where they should fit.
 
@@ -78,12 +78,13 @@ The corollary from this is that if you get to a point where your jobs aren't lik
     go to `within_1_day`. No one is expecting them to finish quickly. YMMV, though, you might
     have time sensitive long-running batch jobs! If you do, those might require a special queue...
   - Other jobs might give away their lack of latency sensitivity by their sheer name.
-- Start by then categorizing and moving your longest running jobs. These are the most likely to
-  ruin your day, so are the most important to categorize.
+- After that, start categorizing and moving your longest running jobs. These are the most likely to
+  ruin your day, so are the most important to categorize. And they won't "fit" in most of your queues,
+  due to their time limits, making the choice easier.
 - Follow by categorizing you highest volume (most enqueued per day) jobs. Those are the other
   greatest candidate for ruining your day.
-- Queues that have the fewest different job classes in them are also a good candidate. They will
-  take a lot less work, and will help with the momentum as your teams see the total number of queues
+- Queues that have the fewest different job classes in them are also a good candidate to take on. 
+  They will take a lot less work, and will help with the momentum as your teams see the total number of queues
   go down. This is a slight "mis-prioritization", but motivation will be key in this project!
 - Once you move all jobs out of a queue, **delete the queue**. Remove the servers. 
   This saves you some money, but most importantly, seeing the queue list shorten will give 
@@ -96,48 +97,27 @@ The corollary from this is that if you get to a point where your jobs aren't lik
   - Set a latency limit for `default` that is 2x as high as it gets in a week.
   - Call it a day.
     - If that latency gets breached at some point, looking at your metrics will probably point 
-      at a clear culprit. Categorize that one into the correct queue and leave the rest.
+      at a clear culprit. Categorize that one into the correct queue and leave the rest alone.
     - If at some point someone notices "one of those jobs didn't run" on time, you'll have a 
       clear latency tolerance defined for you. Categorize that one into the correct queue and leave the rest.
     - **This will feel unsatisfying**, but you probably have bigger technical debt fish to fry at this point.
       You're not aiming for perfection here, you're aiming for queues that are easy to keep healthy. 
 
 **Dont**:
-- Put a job in a queue faster than it needs, just because it finishes fast. 
-  - There's going to be a huge temptation to do this. Remember that the runtime limits we just 
+- Don't put a job in a queue faster than it needs, just because it finishes fast. 
+  - There's going to be a huge temptation to do this, because it's easier than figure out
+    how much latency your job can actually tolerate. Remember that the runtime limits we just 
     discussed are a "minimum speed" requirement, they are not a queue recommendation. 
   - Just because you **can** be in a queue doesn't mean you **should**. If no one will notice 
     when your job runs 10 hours later, it doesn't matter that it finishes in 1 millisecond, 
     put it in the slower queues, don't let it get in the way of the jobs that need the quick latency!
-  - You need to make sure you communicate this **super** clearly, or you'll end up with your 
+  - Make sure to communicate this point **super** clearly with your teams, or you'll end up with your 
     fastest queue clogged with very-fast very-unimportant jobs!
-- Allow folks to put new jobs into the "old queues". If you use Rubocop, 
+- Don't allow folks to put new jobs into the "old queues". If you use Rubocop, 
   use something like this example custom Cop
   that will reject files that go into the queues that don't follow the new naming pattern... 
-  - Add all the existing jobs to the "Rubocop ignore list", so existing jobs are grandfathered it,
+  - Add all the existing jobs to the "Rubocop ignore list", so existing jobs are grandfathered in,
     but nothing new will be allowed in the old queues..
-
-
-## Sizing the servers for the new queues
-
-A very common pattern with Ruby queues is that "a queue will run out of RAM", so the servers
-get configured to have more memory available, but it'll frequently be hard to track down
-which particular job(s) are causing the issue to try and optimize them.
-
-Because of this, these servers tend to only grow.
-
-The migration to new queues will provide a great opportunity to improve on this. If you size
-the new servers to an amount of RAM you consider "should be reasonable for your app", the fact
-that you're gradually add jobs to them will make it easier to pinpoint which jobs may be problematic,
-by looking at which new jobs just got added in the last few hours / days.
-
-Unfortunately, this is a one-time gain. Once the migration is complete, you will be back in the
-position of existing jobs getting gradually bigger over time, and it being hard to figure out
-which is the problematic one.
-
-But as a one-time gain, you can try an under-size your servers and identify troublesome existing jobs.
-
-
 
 ## Realistic Expectations
 
@@ -151,11 +131,11 @@ and some colleagues will want to have guarantees of faster jobs... But you'll ne
 
 1. Deployments: The normal way to deploy an app is to shut down your servers, and boot up 
    new ones with the new code. That takes a while, during which your queue isn't running. 
-   If you want your queues to guarantee latencies lower or near that boot time... 
+   If you want your queues to guarantee latencies lower than or near that boot time... 
    You will need to overlap your servers, boot up new ones first, shut down old ones later. 
    Under some environments, this can be harder to do. If you use Heroku, for example, you simply can't.
 2. Autoscaling: If you want to use autoscaling to deal with spikes, you need to keep in mind 
-   the new servers take a while to boot up. If your queue is `within10seconds`, and your 
+   that the new servers take a while to boot up. If your queue is `within10seconds`, and your 
    server takes 30 seconds to start, there's no latency value you can set autoscale to. 
    If at any point you will need more servers, you've breached your SLO already.
 3. Spikes: The point of queues is to be able to handle variability in demand. In other words, spikes. 
@@ -181,13 +161,15 @@ that latency can go up to 1 minute at times.
 
 ## Using priorities instead of separate queues
 
-Just don't. If you use Sidekiq, you aren't even allowed to do this (good!), but some 
+Just don't. 
+
+If you use Sidekiq, you aren't even allowed to do this (good!), but some 
 queueing systems let you set priorities for your jobs. What this means is, threads will 
 always pick up the highest priority job they can first. So if you have a bunch of low 
 priority jobs, and you enqueue a high priority one, that one "jumps the queue".
 
 This sounds like a good idea in principle, if a job is high priority, we **do** want to 
-run it before the lower priority ones... But it's one of those behaviours of queues that 
+run it before any lower priority ones... But it's one of those behaviours of queues that 
 can be unintuitive.
 
 The problem is that you will have **some** jobs in your queues that are low priority and 
@@ -195,7 +177,7 @@ run for a long time. As long as one of those start running, that thread is now g
 every other job, no matter its priority.
 
 Inevitably, at some point, all your threads will be stuck running slow low priority jobs, and 
-there will be no one left to pick up the higher priority ones. **For a while**. Autoscale may 
+there will be no one left to pick up the higher priority ones. **For quite a while**. Autoscale may 
 help to some extent, but either you are committing to having infinite threads, or you'll end up clogging
 all of them eventually.
 
@@ -206,7 +188,7 @@ Ok, ok, there is **one** way. If your queue system allows you to have a "max pri
 setting, you **can** have priorities, as long as you set you servers up correctly:
 - For each priority level you want in your system, you need a separate set of servers that'll
   pick up jobs **up to that priority** but nothing lower.
-- That way, a "high priority" server will only pick up high priority jobs. Its threads will run
+- That way, you will have a "high priority" server that will **only** pick up high priority jobs. Its threads will run
   idle frequently, even if you have lower priority jobs waiting to get picked up, but you must
   let them be idle.
 - A "lower priority" server can, however, pick up higher priority jobs, since those will finish
@@ -225,11 +207,11 @@ For example:
 - Sometimes you need "singleton" queues. These are rare, and generally an anti-pattern, but sometimes 
   there are good reasons to make sure no 2 jobs in a queue are running at the same time. 
   - Make sure the queue name still declares an SLO, and suffix it with `singleton`, so everyone knows not to autoscale it!
-- Sometimes you need special hardware for some jobs. Generally this means "a lot of RAM". 
+- Sometimes you need special hardware for some jobs. In Ruby this generally means "a lot of RAM". 
   Instead of making all the servers for that queue bigger, you could have a `high_memory` version
   of the queue, for only those hungry jobs, and have only a few big, expensive servers.
   - But make sure the queue name still declares an SLO, and suffix it with `high_memory` so it's obvious what it's for.
-- You may also have jobs that are "high I/O", which spent most of their time waiting and not using CPU. 
+- You may also have jobs that are "high I/O", which spend most of their time waiting and not using CPU. 
   Sending out emails or webhooks are typical examples. For those jobs, you could **wildly** crank up 
   the thread concurrency and save money on servers... But if you also get jobs that need a lot of CPU
   in the same queue, those will suffer from the thread contention. You can have a "high I/O" queue for 
@@ -246,25 +228,45 @@ latency guarantees for those queues, or you'll run into trouble again.
 
 Thoughts and tips for running in production with this queue structure.
 
+## Sizing the servers for the new queues
+
+A very common pattern with Ruby queues is that "a queue will run out of RAM", so the servers
+get configured to have more memory available, but it'll frequently be hard to track down
+which particular job(s) are causing the issue to try and optimize them.
+
+Because of this, these servers tend to only grow.
+
+The migration to new queues will provide a great opportunity to improve on this. Once. If you size
+the new servers to an amount of RAM you consider "should be reasonable for your app", the fact
+that you're gradually adding jobs to them will make it easier to pinpoint which jobs may be problematic,
+by looking at which new jobs just got added in the last few hours / days.
+
+Unfortunately, this is a one-time gain. Once the migration is complete, you will be back in the
+position of existing jobs getting gradually bigger over time, and it being hard to figure out
+which is the problematic one.
+
+But as a one-time gain, you can try an under-size your servers and identify troublesome existing jobs.
+
+
 ## Helping other queues
 
-Some background job systems like Sidekiq allow you to specify a number of queues to run "together".
+Some background job systems like Sidekiq allow you to specify a number of queues to run "together" in one process.
 Generally, these are ordered, such that while there are jobs in the "first" queue, the rest are ignored.
 
 In these circumstances, you might be tempted to set your servers to run not only "their" queue, but also
-the others, so that idle threads can server as extra capacity while their queues are empty.
+the others, so that idle threads can serve as extra capacity while their queues are empty.
 
 Be careful doing this. If you allow the server for a given queue to "help" higher latency (slower) queues,
 you might end up picking up a "low priority, long running" job, which may tie up your thread for a while.
 After a while, all of your threads may be clogged with long running jobs, and there may be no one left to
 run the "higher priority" jobs.
 
-This problem is precisely the reason we want time limits on our jobs. If you try and "help" higher latency
+This problem is precisely the reason we want time limits on our jobs. If you try and "help" slower
 queues, you're undoing those time limits.
 
 **When it is a good idea**
 
-Now you **can** do this in one-direction only. And it may actually be a good idea.
+That said... You **can** do this in one-direction only. And it may actually be a good idea.
 You can have your servers that process "slow" queues also help out with faster ones. That's fine.
 Those "faster" jobs should get out of the way faster than that queue's own jobs would, and arguably
 if there are jobs to run in lower latency queues, those should go first.
@@ -275,18 +277,18 @@ fastest queue, you may not be able to get new servers fast enough.
 
 If you find yourself in this situation, it might be a good idea to set **all** your servers to run the fastest
 queue in addition to their own, thus providing you with extra threads for your most sensitive queue. This is not
-a perfect solution (all those threads from "slower" queues could get tied up with long-running jobs), but in 
+a perfect solution (all those threads from "slower" queues could still get tied up with long-running jobs), but in 
 practice it can help significantly.
 
 Just remember to never have any queues "help out" with anything slower than they normally do.
-This means your fastest queue will frequently have idle threads. This is actually necessary to keep 
+This means your fastest queue will frequently have idle threads. This is sadly actually necessary to keep 
 the latency down.
 
 
 ## Interrupting potentially intensive jobs (see also: data migrations and backfills)
 
 One of the advantages of having queues organized by latency is that you can stop serving a queue
-at any point, and you how long you have until you need to start it back up again, and you also 
+at any point, and you know how long you have until you need to start it back up again, and you also 
 know for sure the functionality driven by that queue won't be affected as long as you stay within
 the latency guarantee.
 
@@ -299,7 +301,9 @@ you can easily stop that queue's servers, and know for a fact nothing else shoul
 This will fail the job and generally make it retry, and it gives you time to remove the job 
 from that "retry" queue and start the queue again.
 
-It also makes sense to put these intensive, non-latency sensitive jobs in the "heaviest" queue 
+This is useful in systems like Sidekiq were stopping a running job is hard or not at all possible.
+
+It also makes sense to put these database intensive jobs in the "slowest" queue 
 because it's the one more likely to get turned off under intense load (see point below).
 
 
@@ -311,34 +315,38 @@ system. If shutting down `within_1_day` is not enough, you can continue with `wi
 you may have reduced the load enough to have bought yourself an hour to deal with the issue at hand.
 Hopefully.
 
-It can be a convenient "killswitch" to have, with its guarantee that nothing will go wrong if you 
+Even if that time is not enough, breaching latency in the "slower" queues is likely to be more tolerable
+to your system that breaching latency on the "faster" queues, which can happen if your database is getting
+hammered.
+
+This can be a convenient "killswitch" to have, with its guarantee that nothing will go wrong if you 
 turn it off for a specific amount of time.
 
 
 ## Manage your developer's expectations 
 
-This is a great time to quote [Hyrum's law](https://www.hyrumslaw.com/)
+This is a great time to quote [Hyrum's law](https://www.hyrumslaw.com/) ([Obligatory XKCD](https://xkcd.com/1172/))
 
 > With a sufficient number of users of an API, it does not matter what you promise in the contract:
 > all observable behaviors of your system will be depended on by somebody.
 
-([Obligatory XKCD](https://xkcd.com/1172/))
-
 This applies to our queues too, and there's a decision to make about the way you run your system in 
 production.
 
-When you have queues that declare they might be high latency, it's sometimes easy to still keep
-their latency near 0. Generally speaking, a queue with _only a little bit_ more capacity than its
-workload demands will have a latency near 0.
+When you have queues that declare they might be high latency, it's sometimes still easy to keep
+their latency near 0 most of the time. Generally speaking, a queue with _only a little bit_ more capacity than its
+workload demands will often have a latency near 0. The key word is "often". They will also spike to very high
+latency occasionally.
 
 You might want to do this. Having queues whose latency is near 0 most of the time feels **great**.
 
 You might also not want to do this, however. For queues where that latency **can** spike to significant delays, if it almost
 never does, it can lead to jobs that unintentionally depend on that "artificial" low latency, which
-may start causing issues when the system start experiencing higher load. Keep in mind that you won't
+may cause issues when the system start experiencing higher load. Keep in mind that you won't
 add more servers until that latency goes *significantly* high compared to it's frequent near-zero
 state...
 
 This is tricky to fight against. You don't want to intentionally slow down your queues (although 
 it may not be the worst idea, if done carefully!). But you might want to keep your server resources
-low when latency is, say, under 20% of your queue's limit, to let it grow a bit.
+low when latency is, say, under 20% of your queue's limit, to let it grow a bit and have jobs 
+regularly experience *some* latency, so any problems can be detected early.
