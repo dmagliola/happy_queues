@@ -117,7 +117,7 @@ The corollary from this is that if you get to a point where your jobs aren't lik
   - Make sure to communicate this point **super** clearly with your teams, or you'll end up with your 
     fastest queue clogged with very-fast very-unimportant jobs!
 - Don't allow folks to put new jobs into the "old queues". If you use Rubocop, 
-  use something like this example custom Cop
+  use something like [this example custom Cop](latency_queues_cop.rb)
   that will reject files that go into the queues that don't follow the new naming pattern... 
   - Add all the existing jobs to the "Rubocop ignore list", so existing jobs are grandfathered in,
     but nothing new will be allowed in the old queues..
