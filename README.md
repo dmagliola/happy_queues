@@ -10,7 +10,10 @@ of sense. :-)
 This document includes information that is hopefully useful to implement the change i'm describing,
 but that didn't fit in the time slot for the talk, or was too distracting from the main point.
 
+## Slides
 
+[Slides deck from the talk (without script)](Slides.pdf)
+[Slides deck from the talk (with script)](Slides_Script.pdf)
 
 # Implementation Considerations
 
