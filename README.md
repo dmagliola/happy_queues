@@ -353,3 +353,183 @@ This is tricky to fight against. You don't want to intentionally slow down your 
 it may not be the worst idea, if done carefully!). But you might want to keep your server resources
 low when latency is, say, under 20% of your queue's limit, to let it grow a bit and have jobs 
 regularly experience *some* latency, so any problems can be detected early.
+
+
+# Monitoring your queues
+
+You know you need good monitoring for your queues, but it may not be obvious what that looks like, or how to do it. 
+Here are some recommendations on what yo aim for, but keep in mind that, in practice, what the best setup is 
+may vary quite a bit depending on your background job system, and your metrics / observability platform.
+
+## Ideal Metrics
+
+The metrics you absolutely want to have are: (higher ones in the list are more important)
+- Queue latency per queue
+- Jobs Worked (Finished) Counters per queue and per job class
+- Jobs Enqueued Counters per queue and per job class
+- Job Duration Statistics per queue and per job class
+- Total time spent per queue and per job class
+- Queue Size per queue
+- Workers / Threads running per queue
+
+### Queue latency per queue
+
+First, a couple of definitions:
+- The "first" job in your queue is the one that will execute next, and it's by definition the oldest / the one that's been waiting the longest.
+- Queue latency is the time elapsed between that "first" job getting enqueued, and now. In other words, how long has the longest-waiting job has been waiting.
+
+This is your most important metric, it's the most important signal of whether you're in trouble,
+and pretty much the thing i'm talking about through the entire talk. If you can only get one metric,
+this is the one.
+
+Most importantly, this metric is what your alerts will be based on, to know if your queues are unhealthy.
+
+You want to have one time series per queue. If your metrics system does tagging / labeling, 
+the `queue` name will be the main tag / label.
+
+In most metrics system, this metric will be a Gauge (because it can go up and down over time).
+
+**A handy trick for alerting: Normalized latency**
+
+In addition to reporting the actual latency, in seconds, it can also be a good idea to report
+the latency as a percentage: how much of the allowed latency are we experiencing right now.
+
+So, if your `within_10_minutes` queue has a latency of 4 minutes, you'll report those 240 seconds,
+but in a separate, "normalized" metric you'll report 0.4.
+A latency of 4 minutes on your `within_1_hour` queue, however, would report 0.066.
+
+This makes it very easy to set up alerts that are agnostic to your actual queue setup.
+Instead of having separate alerts with separate thresholds for your queues, you can set only
+one alert, that triggers for any queue where `normalized_latency > 1`.
+
+It's also useful to visualize in your dashboards. A high latency on a queue that allows it may
+look bad in a graph of "latency per queue", and it may seem worrying when it isn't. On the normalized graph,
+lines only go up proportional to how much that matter.
+
+### Jobs Worked (Finished) Counters per queue and per job class
+
+You want a counter per Job Class, tagged with both `job_class` and `queue`, that is incremented
+every time a job finishes. This allows you to know how frequently each of your jobs is run, which
+is going to be very important to determine what are your highest volume jobs in any queue.
+
+You might also want to add a `status` label, with "success / error", which will let you easily see
+how often a given job class is failing (or overall jobs in a queue are failing). This is a vital health
+metric, if those numbers start shooting up, you're probably having issues somewhere.
+
+### Jobs Enqueued Counters per queue and per job class
+
+Same as before, but the counters would be incremented every time a job is enqueued. This is useful
+mostly to compare with the previous metric, which will allow you to see if jobs are getting enqueued
+faster than the system can cope with. 
+
+This is fine for a short window of time (and to some extent, dealing with those spikes is a large part of why we use queues),
+but if sustained, you may find yourself in trouble, with runaway queues that keep growing and can't keep up.
+
+It will also make it very easy to find out why a queue is suddenly in trouble. You might be able to spot that a 
+given job got suddenly enqueued **way more** than normal, and you can take actions based on that.
+
+### Job Duration Statistics per queue and per job class
+
+You want to know, for each job, how long they are taking to run. You will update this metric each time
+a job finishes, and you should be able to get statistics out of it.
+
+Different metric systems have different ways of doing this. In Datadog, for example, you could use a 
+Histogram or a Distribution (the difference between them is subtle and picking between them depends on
+your particular situation). If you are using Prometheus, you would use a Histogram.
+
+Generally this will give you an `avg` duration, and "approximate percentiles" (median, p95, etc). 
+Please note, **THESE PERCENTILES WILL ALWAYS BE A LIE** to some extent or another. They will be approximate, 
+and how much you can trust them depends on the specifics of your data, and your particular metric system.
+So take them with a pinch of salt. `avg` (mean) can either be accurate or also a lie, again depending on 
+how your particular metric system stores samples. Generally speaking, you can probably trust it more than percentiles. 
+
+That said, even though these won't be exact, they will still give you the information that you need to understand
+the performance characteristics of your jobs.
+
+In particular, this will help you find your "trespassers", jobs that are too slow for the queue they're in.
+
+### Total time spent per queue and per job class
+
+This is the total time you spent on a given job. Imagine you enqueue 1000 jobs of a given class, 
+and they all run in 2 seconds... The average duration (the previous metric) is 2 seconds. The total
+duration (this metric) is 33 minutes (2000 seconds).
+
+This is an important metric for similar reasons to "Jobs Worked". You want to know not only which 
+jobs you run most frequently, but also where you are spending most of your time, and especially
+how much time in total you're spending on your queues, to allow you to estimate how much hardware /
+how many threads you will need.
+
+This one is once again very dependent on your Metrics system, and you may or may not get it for free.
+If you are using Prometheus, the Histogram you'll use for Job Duration will also report a `sum` for you,
+which is exactly this metric. It will also report a `count`, which is exactly "Jobs Worked", so just one
+histogram covers all three cases.
+
+If you are using Datadog, you don't get that `sum` (if you can find it, **please** tell me where it is!).
+You can approximate it doing `jobs worked * avg(duration)`, but you will find that this is also "a lie".
+If you track your actual total (which I recommend), you'll see these don't match, and they can be quite off
+sometimes. This implies to me that the `avg` I talked about earlier is also and approximation and not exact, 
+but I may be wrong here.
+
+Unfortunately, with this level of detail, the devil is in the internal of your metrics system.
+I recommend tracking `total_duration` as a **counter** that you increment for each job you run, 
+so you get a precise number. And then you can also get a precise average doing `total_duration / jobs worked`,
+if the `avg` you get from your metrics is not precise enough.
+
+### Queue Size per queue
+
+The Queue Size is the number of jobs currently in the queue. It will be a Gauge. 
+
+This is useful for diagnosing problems sometimes, it can let you easily see if a queue is much larger than normal.
+Combined with Jobs Enqueued, it can make it easy to spot problems quickly.
+
+**BUT**, it is the least important metric in the list. You will not use this for analysis of your queues, 
+for doing any sort of planning or making decisions, and you will **definitely** not use it for alerts.
+
+Some background job systems unfortunately don't make it easy to get this metric, so if you can't get it, 
+don't worry about it too much.
+
+### Workers / Threads running per queue
+
+Also a gauge, indicating how many workers you have processing a given queue at any given time.
+This is generally only important if you use autoscaling for your queues, and it lets you see,
+when you're in trouble, whether autoscaling did what it was supposed to.
+
+If you can obtain it, a separate gauge letting you know how many of those threads are busy at the 
+moment is also useful (mostly to know whether all threads are busy / clogged at a given time).
+
+
+## Obtaining / reporting these metrics
+
+### Queue latency and Queue Size per queue
+
+Your background job runner might give you these directly (Sidekiq does), or if you're able to peek into the queue,
+you may be able to calculate this yourself.
+
+You want to run a cron every N seconds (don't run more often than your metrics system's granularity!), read the latency
+and size off your queues, and report the value for each of the gauges. This is also where you'd calculate and report normalized latency.
+
+Check `sidekiq_periodic_metrics.rb` for an example you can use as a starting point and modify for your needs.
+
+### Jobs Enqueued Counters per queue and per job class
+
+You will need to increment / report this metric every time a job gets enqueued. Ideally, your
+metrics system allows you to "hook" into the enqueueing process so you can do this 
+(Sidekiq does this through the use of Client Middlewares).
+
+Check `sidekiq_enqueue_metrics.rb` for an example you can use as a starting point and modify for your needs.
+
+This example is unfortunately very Sidekiq-specific. For other queueing systems, the logic may be quite different,
+but you're essentially just figuring out what Queue and what Job you're dealing with, and incrementing a counter.
+
+
+### Jobs Worked Counters and Duration statistics per queue and per job class
+
+Similarly to the previous one, you will need to increment / report this metric every time a job 
+finishes running. Hopefully you have a way of "wrapping" jobs that run by hooking into some part
+of your queueing system, through a common base class for all your jobs, or something similar.
+(Sidekiq does this through the use of Server Middlewares).
+
+Check `sidekiq_execution_metrics.rb` for an example you can use as a starting point and modify for your needs.
+
+This example is unfortunately very Sidekiq-specific. For other queueing systems, the logic may be quite different,
+but you're essentially just figuring out what Queue and what Job you're dealing with, and timing the execution.
