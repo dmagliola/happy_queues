@@ -2,7 +2,7 @@
 
 Companion for my Rubyconf 2022 talk: "The secret to happy queues"
 
-(Video recording coming soon!)
+[![alt text](talk_thumbnail_rubyconf.jpg)](https://www.youtube.com/watch?v=pxHQ-hYjZKA)
 
 If you haven't seen the talk, I'd recommend doing that first, otherwise this won't make a lot
 of sense. :-)
